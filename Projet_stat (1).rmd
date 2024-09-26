@@ -1,0 +1,1208 @@
+---
+title: "Projet_stat"
+output: html_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tidyverse)
+library(fastDummies)
+library(glmnet)
+```
+
+# Partie 1 : Exploration de donńees
+
+## 1-Pré-traitement:
+
+### Importation des données:
+
+```{r}
+insurance<- read.csv(file.choose(), header = TRUE,sep=";",na.strings = c("", " "))
+View(insurance)
+attach(insurance)
+```
+
+
+```{r}
+#### convert chr columns to factors:
+columns_to_convert <- c("sex","smoker", "region")
+
+insurance[columns_to_convert] <- lapply(insurance[columns_to_convert], factor)
+```
+
+
+### Présentation et résumé statistique:
+
+```{r}
+summary(insurance)
+str(insurance)
+names(insurance)
+dim(insurance)
+```
+```{r}
+head(insurance)
+tail(insurance)
+
+```
+
+### Traitement des valeurs manquantes:
+
+```{r}
+na_tot<- sum(is.na(insurance))
+na_tot_col<- colSums(is.na(insurance))
+print(na_tot)
+print(na_tot_col)
+```
+
+#### Le jeu de données ne contient pas de valeurs manquantes.
+
+
+### Traitement des valeurs aberrantes:
+
+#### Variables quantitatives:
+
+```{r}
+quantitative_columns <- c("age", "bmi", "children", "charges")
+
+calculate_z_scores <- function(x) {
+  (x - mean(x)) / sd(x)
+}
+z_scores <- lapply(insurance[quantitative_columns], calculate_z_scores)
+
+# Identifying outliers (threshold: ±3)
+outliers <- apply(abs(do.call(cbind, z_scores)), 1, max) > 3
+
+# Displaying rows with outliers
+outliers_data <- insurance[outliers, ]
+print(outliers_data)
+
+```
+
+
+
+```{r}
+par(mfrow = c(2, 2))
+quantitative_vars <- sapply(insurance, is.numeric)
+
+numeric_data <- insurance[, quantitative_vars]
+
+#boxplot pour les variables quantitatives
+library(plotly)
+boxplots <- lapply(colnames(numeric_data), function(variable) {
+  plot_ly(data = numeric_data, y = ~get(variable), type = "box", name = variable) %>%
+    layout(title = paste("Boxplot of", variable))
+})
+subplot(boxplots)
+par(mfrow = c(1, 1))
+```
+
+```{r}
+summary(insurance[c("age", "bmi", "children", "charges")])
+```
+
+
+#### Bien que l'analyse du z_score et des boxplots des variables quantitatives suggère l'existence de valeurs abérrantes, l'analyse de ces valeurs montre qu'il s'agit de valeurs extrêmes possibles, par exemple un bmi de 53.12 signifie une obésité très excessive...
+
+#### Les variables qualitatives:
+```{r}
+par(mfrow = c(2, 2))
+ggplot(insurance, aes(x = sex, fill = sex)) +
+  geom_bar() +
+  labs(title = "Bar Plot of Sex", x = "Sex", y = "Count") +
+  theme_minimal()
+
+ggplot(insurance, aes(x = region, fill = sex)) +
+  geom_bar() +
+  labs(title = "Bar Plot of Region", x = "Region", y = "Count") +
+  theme_minimal()
+
+ggplot(insurance, aes(x = smoker, fill = smoker)) +
+  geom_bar() +
+  labs(title = "Bar Plot of Smoker", x = "smoker", y = "Count") +
+  theme_minimal()
+par(mfrow = c(1, 1))
+```
+
+#### l'analyse des graphiques a permis de vérifier l'absence des valeurs abérrantes pour les variables qualitatives.
+#### Le jeu de données ne contient pas de valeurs abérrantes.
+
+### Traitement des doublons:
+
+```{r}
+any(duplicated(insurance))
+sum(duplicated(insurance))
+insurance[duplicated(insurance) | duplicated(insurance, fromLast = TRUE), ]
+insurance<-unique(insurance)
+any(duplicated(insurance))
+```
+
+## 2- Analyse univariée:
+
+### Variables quantitaives (distribution et noramlité):
+
+#### La variable "Age":
+
+```{r}
+summary(age)
+boxplot(age, main = "Boxplot de la variable Age", ylab = "Age")
+```
+
+```{r}
+hist(age, main = "Histogram de la variable Age", xlab = "Age")
+ggplot(data = insurance, aes(x = age)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+  stat_function(fun = dnorm, args = list(mean = mean(insurance$age), sd = sd(insurance$age)), color = "red", size = 1) +
+  labs(title = "Density Plot with Normal Distribution",
+       x = "Age",
+       y = "Density") +
+  theme_minimal()
+qqnorm(age)
+qqline(age, col = 2)
+```
+
+
+
+#### L'histogramme, le density plot et le qq-plot sont des outils graphiques pour vérifier la disttribution d'une variable quantitative en particulier sa normalité.
+
+#### le test de Shapiro-Wilk:
+
+```{r}
+shapiro.test(age)
+```
+#### On rejette l'hypothèse de normalité.
+### L'analyse graphique et le test statistique nous mène à dire que la variable âge ne suit pas une distribution normale.
+
+#### La variable "bmi":
+
+Higher BMI is correlated to higher body fat and thus, also correlated to metabolic diseases. BMI is thus a measure of body weight status. For adults, BMI below 18.5 is considered underweight, BMI of 18.5 – 24.9 is considered normal, BMI of 25.0 – 29.9 is considered overweight while BMI above 30 is considered obese.
+
+```{r}
+summary(bmi)
+boxplot(bmi, main = "Boxplot de la variable bmi", ylab = "bmi")
+```
+
+```{r}
+hist(age, main = "Histogram de la variable bmi", xlab = "bmi")
+ggplot(data = insurance, aes(x = bmi)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+  stat_function(fun = dnorm, args = list(mean = mean(insurance$bmi), sd = sd(insurance$bmi)), color = "red", size = 1) +
+  labs(title = "Density Plot with Normal Distribution",
+       x = "BMI",
+       y = "Density") +
+  theme_minimal()
+qqnorm(bmi)
+qqline(bmi, col = 2)
+```
+
+
+#### le test de Shapiro-Wilk:
+
+```{r}
+shapiro.test(bmi)
+```
+#### la variable bmi ne suit pas une distribution normale.
+
+#### La varibale "children":
+
+
+```{r}
+summary(children)
+boxplot(children, main = "Boxplot de la variable children", ylab = "children")
+```
+
+```{r}
+hist(children, main = "Histogram de la variable children", xlab = "children")
+ggplot(data = insurance, aes(x = children)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+  stat_function(fun = dnorm, args = list(mean = mean(insurance$children), sd = sd(insurance$children)), color = "red", size = 1) +
+  labs(title = "Density Plot with Normal Distribution",
+       x = "Children",
+       y = "Density") +
+  theme_minimal()
+qqnorm(children)
+qqline(children, col = 2)
+```
+
+#### le test de Shapiro-Wilk:
+
+```{r}
+shapiro.test(children)
+```
+#### la variable children ne suit pas une distribution normale.
+
+#### La varibale "Charges":
+
+```{r}
+summary(charges)
+boxplot(charges, main = "Boxplot de la variable Charges", ylab = "Charges")
+```
+
+```{r}
+hist(charges, main = "Histogram de la variable Charges", xlab = "Charges")
+ggplot(data = insurance, aes(x = charges)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+  stat_function(fun = dnorm, args = list(mean = mean(insurance$charges), sd = sd(insurance$charges)), color = "red", size = 1) +
+  labs(title = "Density Plot with Normal Distribution",
+       x = "charges",
+       y = "Density") +
+  theme_minimal()
+qqnorm(charges)
+qqline(charges, col = 2)
+```
+
+#### le test de Shapiro-Wilk:
+
+```{r}
+shapiro.test(charges)
+```
+#### la variable "charges" ne suit pas une distribution normale.
+
+
+### Variables qualitatives (modalités):
+
+
+#### La varibale "sex":
+
+
+```{r}
+summary(insurance$sex)
+```
+
+```{r}
+
+ggplot(insurance, aes(x = sex, fill = sex)) +
+  geom_bar() +
+  labs(title = "Bar Plot of Sex", x = "Sex", y = "Count") +
+  theme_minimal()
+df <- insurance %>% 
+  group_by(sex) %>% # Variable to be transformed
+  count() %>% 
+  ungroup() %>% 
+  mutate(perc = `n` / sum(`n`)) %>% 
+  arrange(perc) %>%
+  mutate(labels = scales::percent(perc))
+
+
+ggplot(df, aes(x = "", y = "", fill = sex)) +
+  geom_col() +
+  geom_label(aes(label = labels),
+             position = position_stack(vjust = 0.5),
+             show.legend = FALSE) +
+  coord_polar(theta = "y") 
+ 
+ 
+
+
+
+
+```
+
+
+
+
+#### La varibale "Smoker":
+
+
+```{r}
+summary(insurance$smoker)
+```
+
+```{r}
+ggplot(insurance, aes(x = smoker, fill = smoker)) +
+  geom_bar() +
+  labs(title = "Bar Plot of Smoker", x = "Sex", y = "Count") +
+  theme_minimal()
+df2<- insurance %>% 
+  group_by(smoker) %>% # Variable to be transformed
+  count() %>% 
+  ungroup() %>% 
+  mutate(perc1 = `n` / sum(`n`)) %>% 
+  arrange(perc1) %>%
+  mutate(labels = scales::percent(perc1))
+
+
+ggplot(df2, aes(x = "", y = perc1, fill = smoker)) +
+  geom_col(color = "black") +
+  geom_label(aes(label = labels), color = c("white", "white"),
+            position = position_stack(vjust = 0.5),
+            show.legend = FALSE) +
+  guides(fill = guide_legend(title = "Smoker")) +
+  scale_fill_viridis_d() +
+  coord_polar(theta = "y") + 
+  theme_void()
+```
+
+
+
+#### La varibale "Region":
+
+```{r}
+summary(insurance$region)
+```
+
+```{r}
+ggplot(insurance, aes(x = region, fill = region)) +
+  geom_bar() +
+  labs(title = "Bar Plot of region", x = "Region", y = "Count") +
+  theme_minimal()
+df3 <- insurance %>% 
+  group_by(region) %>% # Variable to be transformed
+  count() %>% 
+  ungroup() %>% 
+  mutate(perc3 = `n` / sum(`n`)) %>% 
+  arrange(perc3) %>%
+  mutate(labels = scales::percent(perc3))
+
+
+ggplot(df3, aes(x = "", y = "", fill = region)) +
+  geom_col() +
+  geom_label(aes(label = labels),
+             position = position_stack(vjust = 0.5),
+             show.legend = FALSE) +
+  coord_polar(theta = "y")
+```
+
+## 2- Analyse bivariée:
+
+### Corŕelation entre les variables quantitatives:
+
+#### Corrélation Age-BMI:
+
+Commençons par une inspection graphique:
+
+```{r}
+ggplot(insurance, aes(x = age, y = bmi)) +
+  geom_point(alpha = 0.7, color = "red", size = 3) +
+  labs(title = "Scatter Plot Age vs BMI",
+       x = "Age",
+       y = "BMI") +
+  theme_minimal() +
+  xlim(c(min(insurance$age) - 5, max(insurance$age) + 5)) +
+  ylim(c(min(insurance$bmi) - 5, max(insurance$bmi) + 5))
+```
+
+
+#### le nuage de points n’a pas de forme particulière, le BMI semble être réparti de manière assez uniforme pour tous la âges.
+
+       **La dépendance entre l'âge et le BMI est faible ou nulle.**
+  
+ 
+            
+             
+
+#### calcul des coefficients de corrélation:
+
+* La condition de normalité n'est pas vérifiée
+* On procède alors au calcul de coefficient de corrélation de Spearman:
+
+
+```{r}
+cor(age,bmi,method = "spearman")
+```
+#### Test de significativité:
+```{r}
+cor.test(age, bmi, method ="spearman")
+```
+#### Conclusion:
+
+Le test de signficativité assure l'existence d'une faible liaison monotone statistiquement signficative (de l'ordre de 10%).
+
+### Corrélation Age-CHILDREN:
+
+```{r}
+ggplot(insurance, aes(x =children, y = age)) +
+  geom_point(alpha = 0.7, color = "red", size = 3) +
+  labs(title = "Scatter Plot Age vs Children",
+       x = "Age",
+       y = "Children") +
+  theme_minimal()
+
+
+```
+
+
+#### Ce nuage de points suggère l'absence de liaison entre les variables Age et Children:
+  
+             **Les variables âge et Children ne sont pas corrélées**
+             
+
+#### calcul du coefficient de corrélation:
+
+
+```{r}
+cor(age,children,method = "spearman")
+```
+#### Test de significativité:
+```{r}
+cor.test(age, children, method ="spearman")
+```
+#### Conclusion:
+
+* la valeur du coefficient de corrélation entre les variables étudiées est presque nulle.
+
+* Le test de signficativité assure l'existence d'une dépendance statistiquement signficative mais très faible entre les variables.
+
+        **Les variables âge et Children ne sont pas corrélées**
+
+
+#### Corrélation Age-charges:
+
+
+```{r}
+ggplot(insurance, aes(x = age, y = charges)) +
+  geom_point(alpha = 0.7, color = "red", size = 3) +
+  labs(title = "Scatter Plot Age vs Charges",
+       x = "Age",
+       y = "Charges") +
+  theme_minimal()
+
+  
+```
+
+
+#### Ce nuage de points renseigne sur:
+
+ * La forme de la liaison: On peut détécter l'existence d'une liaison          moyennement monotonne entre les deux variables.
+ * Le sens de la liaison:L'âge et la charge évoluent dans le même sens,       c'est une liaison positive( plus l'âge augmente plus la charge augmente). 
+ * L'intensité de la liaison: Les points sont moyennement concentrés.  
+ 
+             **C'est une liaison monotone positive moyennement forte**
+             
+
+#### calcul du coefficient de corrélation:
+
+```{r}
+cor(age,charges,method = "spearman")
+```
+#### Test de significativité:
+```{r}
+cor.test(age, charges, method ="spearman")
+```
+#### Conclusion:
+
+* Le test de significativité assure l'existence de dépendance significative entre les deux variables.
+la valuer du coefficient de corrélation, ainsi que l'inspection graphique impliques l'existence d'une liaison monotone positive moyennement forte. 
+
+
+
+#### "EXTRA" Essayons de voir l'effet du tabagisme (variable "smoker") et du genre (variable "sex") sur cette relation (Age-charges):
+
+
+```{r}
+ggplot(insurance, aes(x = age, y = charges, color = smoker)) +
+  geom_point() +
+  facet_grid(sex ~ ., scales = "free") +
+  labs(title = "Relationship between Age, Charges, and Smoking Status",
+       x = "Age", y = "Charges", color = "Smoker") +
+  theme_minimal()
+```
+
+#### On remarque que:
+
+* Les fumeurs présentent généralement des charges plus élevées que les non-fumeurs pour tous les âges.
+* Cette tendance est observée de manière cohérente pour les deux sexes.
+
+
+### Corrélation BMI-CHILDREN:
+
+```{r}
+ggplot(insurance, aes(x =children, y = bmi)) +
+  geom_point(alpha = 0.7, color = "red", size = 3) +
+  labs(title = "Scatter Plot BMI vs Children",
+       x = "BMI",
+       y = "Children") +
+  theme_minimal()
+
+
+```
+
+
+#### Ce nuage de points suggère l'absence de liason entre BMI et Children:
+  
+             **Les variables BMI et Children ne sont pas corrélées**
+             
+
+#### calcul du coefficient de corrélation:
+
+
+```{r}
+cor(bmi,children,method = "spearman")
+```
+#### Test de significativité:
+```{r}
+cor.test(age, children, method ="spearman")
+```
+#### Conclusion:
+
+* la valeur du coefficient de corrélation entre les variables étudiées est presque nulle.
+
+* Le test de signficativité assure l'existence d'une dépendance statistiquement signficative entre les variables étudiées.
+
+        **Les variables BMI et Children ne sont pas corrélées**
+        
+        
+        
+        
+### Corrélation BMI-Charges:
+
+```{r}
+ggplot(insurance, aes(x=bmi, y = charges)) +
+  geom_point(alpha = 0.7, color = "red", size = 3) +
+  labs(title = "Scatter Plot BMI vs Charges",
+       x = "BMI",
+       y = "Charges") +
+  theme_minimal()
+
+
+```
+
+
+#### Le nuage de points montre l'absence d'une realtion linéaire mais affiche une ceratine tendance, on a donc une relation faiblement monotone. De plus le sens de cette relation est positif et les points sont moyennement concentrés (il existe plusieurs points qui sortent du lot)
+  
+             **C'est une liaison positive, faiblement monotone et moyennement intense**
+             
+
+#### calcul du coefficient de corrélation:
+
+
+```{r}
+cor(bmi,charges,method = "spearman")
+```
+#### Test de significativité:
+```{r}
+cor.test(bmi, charges, method ="spearman")
+```
+#### Conclusion:
+
+* la valeur du coefficient de corrélation entre les variables étudiées est faible.
+
+* Le test de signficativité assure l'existence d'une dépendence statistiquement signficative (on rejette H0) qui demeure faible entre les variables.
+
+        **Les variables BMI et Charges sont faiblement corrélées**
+        
+
+#### "EXTRA" Essayons de voir l'effet du tabagisme (variable "smoker")  sur la relation BMI-charges:
+
+
+```{r}
+ggplot(insurance, aes(x = bmi, y = charges, color = smoker)) +
+  geom_point() +
+  
+  labs(title = "Relationship between BMI, Charges, and Smoking Status",
+       x = "BMI", y = "Charges", color = "Smoker") +
+  theme_minimal()
+```
+
+
+#### On remarque que le tabagisme combiné à une augmentation du BMI (obésité) entraîne une augmentation des charges médicales.
+
+
+### Corrélation Children-Charges:
+
+```{r}
+ggplot(insurance, aes(x =children, y = charges)) +
+  geom_point(alpha = 0.7, color = "red", size = 3) +
+  labs(title = "Scatter Plot Children vs charges",
+       x = "children",
+       y = "Carges") +
+  theme_minimal()
+
+
+```
+
+
+#### Pas de corrélation entre les variables children et charges
+  
+             
+             
+
+#### calcul du coefficient de corrélation:
+
+
+```{r}
+cor(children,charges,method = "spearman")
+```
+#### Test de significativité:
+```{r}
+cor.test(charges, children, method ="spearman")
+```
+#### Conclusion:
+
+* la valeur du coefficient de corrélation entre les variables étudiées est faible.
+
+* Le test de signficativité assure l'existence d'une dépendance statistiquement signficative on rejette (H0 et on accepte H1) .
+
+        **Les variables Children et Charges sont très faiblement corrélées**
+        
+
+        
+### Dépendance de la variable cible par chacune des variables qualitatives:
+
+
+### Influence de la variabe "région"  sur la variable cible "charges"
+
+#### Représentation graphique du lien entre les deux variables:
+
+```{r}
+boxplot(charges~region)
+
+```
+
+
+#### Graphiquement, On remarque pas un effet notable en changeant la modalité de la variable "region" au niveau des valeurs de référence de la variable "charges".
+
+#### Passons maintenant à l'étude de la relation entre les deux variables en utilisant le test statistique approprié:
+
+### La variable "région" possède 4 modalités, donc le premier test possible à appliquer est l’ANOVA, vérifiant alors ses conditions d’application.
+
+* Normalité:
+
+```{r}
+tapply(charges,region,shapiro.test)
+```
+
+#### Le test de normalité appliqué aux sous groupes correspondant aux 4 modalités retourne une p-value <0.05 on n'a pas de normalité pour tous les sous groupes.
+
+* Homogénéité:
+
+```{r}
+bartlett.test(charges~region)
+```
+
+#### p − value = 1.009e-05 < 0.05, on accepte alors H1 : pas d’égalité entre les variances.
+
+
+#### On ne peut pas appliquer l’ANOVA. Le test non paramétrique 
+#### le plus adéquat pour notre cas est un test qui compare entre 4 échantillons  
+#### de la variable "Region" à 4 modalités. On applique le test de Kruskal Wallis.
+
+
+```{r}
+kruskal.test(charges~region)
+```
+#### p-value = 0.1923 > 0.05, on accepte H0; pas d'effet de la variable "région" sur la variable "charges".
+
+
+### Influence de la variabe "Smoker" sur la variable cible "charges":
+
+
+#### Représentation graphique du lien entre les deux variables:
+
+```{r}
+boxplot(charges~smoker)
+
+```
+
+#### On remarque la liaison entre les deux variables, en changant la modalité de la variable Smoker, on remarque un changement au niveau des valeurs de référence de la variable charges. Alors il existe un effet de Smoker sur Charges.
+
+
+#### Passons maintenant à l'étude de la relation entre les deux variables en utilisant le test statistique approprié:
+
+### La variable "Smoker" possède 2 modalités, donc le premier test possible à appliquer est le test de Student, vérifiant alors ses conditions d’application.
+
+
+* Independence: Les observations dans chaque sous groupe sont indépendantes les unes des autres. 
+
+* Normalité:
+
+```{r}
+tapply(charges,smoker,shapiro.test)
+```
+
+#### Le test de normalité appliqué aux sous groupes correspondant aux 2 modalités retourne une p-value <0.05 on n'a pas de normalité pour tous les sous groupes.
+
+* Homogénéité:
+
+```{r}
+bartlett.test(charges~smoker)
+
+```
+
+#### p − value = 2.2e-16 < 0.05, on accepte alors H1 et on rejette H0 : pas d’égalité entre les variances.
+
+
+#### On ne peut pas appliquer le test de Student. Le test non paramétrique 
+#### le plus adéquat pour notre cas est un test qui compare entre 2 échantillons  
+#### de la variable "smoker" à 2 modalités. On applique le test de Wilcoxon-Mann-Whitney.
+
+```{r}
+wilcox.test(charges~smoker)
+```
+#### p-value < 2.2e-16, on rejette H0, on a un effet de la variable smoker sur la variable charges.
+
+
+### Influence de la variabe "Sex" sur la variable cible "charges":
+
+
+#### Représentation graphique du lien entre les deux variables:
+
+```{r}
+boxplot(charges~sex)
+
+```
+
+#### Graphiquement, On remarque pas un effet notable en changeant la modalité de la variable "sex" au niveau des valeurs de référence de la variable "charges".
+
+
+#### Passons maintenant à l'étude de la relation entre les deux variables en utilisant le test statistique approprié:
+
+### La variable "Sex" possède 2 modalités, donc le premier test possible à appliquer est le test de Student, vérifiant alors ses conditions d’application.
+
+
+* Independence: Les observations dans chaque sous groupe sont indépendantes les unes des autres. 
+
+* Normalité:
+
+```{r}
+tapply(charges,sex,shapiro.test)
+```
+
+#### Le test de normalité appliqué aux sous groupes correspondant aux 2 modalités retourne une p-value <0.05 on n'a pas de normalité pour tous les sous groupes.
+
+* Homogénéité:
+
+```{r}
+bartlett.test(charges~sex)
+
+```
+
+#### p-value = 7.887e-05, on accepte alors H1 et on rejette H0 : pas d’égalité entre les variances.
+
+
+#### On ne peut pas appliquer le test de Student. Le test non paramétrique 
+#### le plus adéquat pour notre cas est un test qui compare entre 2 échantillons  
+#### de la variable "sex" à 2 modalités. On applique le test de Wilcoxon-Mann-Whitney.
+
+```{r}
+wilcox.test(charges~sex)
+```
+#### p-value = 0.7287, on accepte H0, la variable "sex" n'a pas d'effet sur la variable charges.
+
+
+### Dépendance de la variable cible par les deux variables qualitatives (sexe et smoker):
+
+#### Pour évaluer la dépendance de "charges" par les deux variables qualitatives 
+#### "sex" et "smoker", on ajoute à notre dataset une variable synthétique qu'on appelle
+#### "sex_smoker". Cette variable constitue l'intéraction entre les variables "sex" et "smoker" et possède 4 modalités possibles constituant les différentes combinaisons entre les variables qualitatives originales: 
+#### MaleYes: Signifie un individu de sexe masculin qui est fumeur.
+#### MaleNo: Signifie un individu de sexe masculin qui n'est pas fumeur.
+#### FemaleYes: Signifie un individu de sexe féminin qui est fumeur.
+#### FemaleNo: Signifie un individu de sexe féminin qui n'est pas fumeur.
+
+
+```{r}
+insurance$sex_smoker <- interaction(insurance$sex, insurance$smoker, sep = "")
+attach(insurance)
+View(insurance)
+```
+
+#### Le problème se ramène ainsi à l'évaluation de l'effet d'une variable qualitative à une variable quantitative.
+
+#### Représentation graphique du lien entre les deux variables:
+
+```{r}
+boxplot(charges~sex_smoker)
+
+```
+
+#### On remarque la liaison entre les deux variables, en changeant la modalité de la variable sex_smoker, on remarque un changement au niveau des valeurs de référence de la variable charges. Alors il existe un effet de sex_smoker sur Charges.
+#### Plus précisément, les fumeurs ont tendance à avoir des charges plus élevées que les non fumeurs, et ce quelque soit leur genre. 
+#### La variable "sex" seule a un impact relativement limité sur la variable "charges".
+
+#### Passons maintenant à l'étude de la relation entre les deux variables en utilisant le test statistique approprié:
+
+### La variable "sex_smoker" possède 4 modalités, donc le premier test possible à appliquer est le test d'analyse de la variance ANOVA, vérifiant alors ses conditions d’application.
+
+* Normalité:
+
+```{r}
+tapply(charges,sex_smoker,shapiro.test)
+```
+
+#### Le test de normalité appliqué aux sous groupes correspondant aux 4 modalités retourne une p-value <0.05 on n'a pas de normalité pour tous les sous groupes.
+
+* Homogénéité:
+
+```{r}
+bartlett.test(charges~sex_smoker)
+
+```
+
+#### p − value = 2.2e-16 < 0.05, on accepte alors H1 et on rejette H0 : pas d’égalité entre les variances.
+
+
+#### On ne peut pas appliquer le test ANOVA. Le test non paramétrique 
+#### le plus adéquat pour notre cas est un test qui compare entre les 4 échantillons  
+#### de la variable "sex_smoker" à 4 modalités. On applique le test de Kruskal_Wallis.
+
+```{r}
+kruskal.test(charges~sex_smoker)
+```
+#### p-value < 2.2e-16, on rejette H0, on a un effet de la variable sex_smoker sur la variable charges.
+
+
+### Etude de l’interaction entre les variables qualitatives explicatives "sex" et "smoker".
+
+
+### Pour évaluer la relation entre deux variables catégoriques, on utilise le test du chi-carré (KHI DEUX).
+
+### Les conditions d'application de ce test sont:
+
+* L'indépendance des observations.
+
+* L'échantillon étudié a une taille suffisamment grande (n>30) de plus chaque cellule de du tableau de contingence doit avoir un effectif attendu suffisant (>5).
+
+### Les hypothèses du test:
+
+*H0 : Les variables sont indépendantes.
+
+*H1 : Il existe une liaison entre les deux variables.
+
+
+#### Commençons par la construction de notre tableau de contingence:
+
+```{r}
+tab_contingence<- table(insurance$sex, insurance$smoker)
+print(tab_contingence)
+```
+
+#### Appliquons maintenant le test du chi-carré :
+
+```{r}
+chi_test <- chisq.test(tab_contingence)
+print(chi_test)
+```
+#### La valeur de p-value = 0.006548 < 0.05, on rejette alores H0 et on accepte H1, il existe alors une intéraction entre les variables sex et smoker.
+
+#### Essayons maintenant de vérifier cette liaison entre les variables qualitatives graphiqument en utilisant un "mosaicplot":
+
+
+```{r}
+mosaicplot(table(sex, smoker), main = "Mosaic Plot of Sex and Smoker")
+```
+
+#### En observant l'alignement vertical et horizontal des rectangles dans la mosaicplot et en prenant en considération les variations de taille des rectangles, on peut mettre en évidence la dépendance entre les deux variables qualitatives étudiées.  
+
+# Partie 2 : Modèles linéaires:
+
+## 1- Régression linéaire multiple:
+
+#### Pour effectuer la régression linéaire, on a procédé à l'encodage des variables catégoriques de notre dataset (dummy encoding).
+
+```{r}
+
+insurance_modif3<-insurance
+insurance_modif3_encoded <- dummy_cols(insurance_modif3, select_columns = "sex", remove_first_dummy = TRUE)
+insurance_modif3_encoded <- subset(insurance_modif3_encoded, select = -c(sex))
+
+insurance_modif3_encoded <- dummy_cols(insurance_modif3_encoded, select_columns = "smoker", remove_first_dummy = TRUE)
+insurance_modif3_encoded <- subset(insurance_modif3_encoded, select = -c(smoker))
+
+insurance_modif3_encoded <- dummy_cols(insurance_modif3_encoded, select_columns = "region", remove_first_dummy = TRUE)
+insurance_modif3_encoded <- subset(insurance_modif3_encoded, select = -c(region))
+
+insurance_encoded<-insurance_modif3_encoded[, -5]
+```
+
+#### Le nouveau jeu de données ne contient que des variables numériques.
+
+```{r}
+View(insurance_encoded)
+```
+
+
+#### On a ensuite effectué une régression linéaire multiple de la variable "charges" (variable dépendante) avec le reste des variables (explicatives).
+
+```{r}
+modele_1<-lm(charges~.,data=insurance_encoded)
+summary(modele_1)
+```
+
+
+
+#### Le modèle qui prend compte de toutes les variables a un coefficient de détérmination R²=0.7509 (bonne qualité de régression, 75% de la variablilité des charges est expliquée par les autres variables.)
+
+#### Les variables les moins significatives sont les variables avec la p-value la plus
+#### importantes. Les deux variables les moins significatives sont : ”sex ” et
+### ”region”.
+
+#### Ce qui est en concordance avec les résultats de l'analyse bivariée.
+
+#### De plus cette on a constaté lors de cette analyse que la variable children n'a pas d'effet notable sur la variable chrages.
+
+#### On éliminera donc ces trois variables.
+
+
+#### Appliquons maintenant le modèle final après avoir effectué la séléction des variables.
+
+
+```{r}
+modele1<-lm(charges~age+bmi+smoker_yes,data=insurance_encoded)
+```
+
+### Diagnostic graphique et évaluation de la performance du modèle:
+
+
+```{r}
+summary(modele1)
+```
+#### Pas de changement remarquable au niveau de R² = 0.7475 et R² ajusté: la qualité du modèle n’est pas affectée.
+
+#### Calculons AIC et le RMSE du modele1.
+
+```{r}
+
+predicted_values <- predict(modele1)
+residuals <-  insurance_encoded$charges- predicted_values
+rmse <- sqrt(mean(residuals^2))
+print(paste("RMSE modele1:", rmse))
+print(paste("AIC du modele1 : ", AIC(modele1)))
+
+
+```
+#### Graphiquement:
+
+```{r}
+plot(modele1)
+```
+
+##### Les résidus ne sont pas symétriques autour de zéro et leur comportement n'est pas unimodal,Ils sont corrélés et non normaux et de moyenne non nulle.
+
+#### Conclusion: Les variables age, bmi et smoker explique une grande partie de la variabilité de la variable charges, mais il peut être utile d'explorer des modifications au modèle, d'ajouter des termes, ou d'appliquer des transformations aux variables pour améliorer la qualité de l'ajustement.
+
+
+## 2- Régression linéaire améliorée:
+
+
+
+### Modification 1 : Relation non linéaire entre l’âge et les charges :
+
+```{r}
+insurance_encoded$age2 <- (insurance_encoded$age)^2
+
+str(insurance_encoded$age2)
+```
+
+
+### Modification 2 : Conversion d'une variable numérique en un indicateur binaire :
+
+
+```{r}
+insurance_encoded$bmi30 <- ifelse(insurance_encoded$bmi >= 30, 1, 0)
+str(insurance_encoded$bmi30)
+```
+
+### Modification 3 : Ajout d’effet d’interaction :
+
+```{r}
+modele2 <- lm(charges ~ age + age2  + smoker*bmi30, data = insurance_encoded)
+summary(modele2)
+```
+
+#### Evaluation du deuxième modèle:
+
+```{r}
+summary(modele2)
+```
+
+#### Le modèle obtenu après avoir effectué les 3 modifications possède un meilleur R² et R² ajusté que le premier modèle (0.86>0.75) ; les modifications qu'on a faites nous ont permis d'expliquer plus de variabilité de la variables charges.
+
+```{r}
+print(paste(" AIC du modèle 1: ", AIC(modele1)))
+print(paste(" AIC du modèle 2: ", AIC(modele2)))
+
+```
+
+#### AIC(modele2) est bien inférieur à AIC(modele1), on déduit alors que la qualité du modèle 2 est bien meilleure que celle du modèle 1.
+
+```{r}
+predicted_values1 <- predict(modele1)
+residuals1 <-  insurance_encoded$charges- predicted_values1
+rmse1 <- sqrt(mean(residuals1^2))
+print(paste("RMSE modele1:", rmse1))
+predicted_values2 <- predict(modele2)
+residuals2 <-  insurance_encoded$charges- predicted_values2
+rmse2 <- sqrt(mean(residuals2^2))
+print(paste("RMSE modele2:", rmse2))
+```
+#### Le RMSE du modèle 2 est bien inférieur au RMSE du modèle 1, ainsi le modèle 2 est bien plus performant. 
+
+#### Graphiquement:
+
+```{r}
+plot(modele2)
+```
+
+
+#### On constate une nette amélioration des graphiques des résidus pour le deuxième modèle par rapport au premier.
+
+#### En effet, les résidus commence à montrer une symétrie par rapport à zéro, s'approchant progressivement d'une distribution unimodale. Ce comportement semble prendre l'allure d'un bruit blanc, suggérant ainsi une absence de corrélation. De plus, une grande partie des résidus suit principalement une distribution normale.
+
+#### Conclusion:
+
+Le deuxième modèle obtenu après avoir effectué les 3 modifications est bien meilleur que le premier. Les variables introduites ont pu expliquer les charges de manière plus précise.
+
+## 3- Régression pénalisée:
+
+
+
+#### La régression pénalisée est une technique qui vise à résoudre le problème de surajustement (overfitting) en introduisant une pénalité sur la magnitude des coefficients du modèle. Les deux méthodes de régression pénalisée les plus couramment utilisées sont la régression ridge (L2) et la régression lasso (L1). Ces méthodes ajoutent une pénalité à la fonction de coût, limitant ainsi la croissance des coefficients et aidant à prévenir la surajustement.
+
+#### Régression Ridge (L2)
+
+La régression ridge ajoute une pénalité égale au carré de la magnitude des coefficients à la fonction de coût. L'objectif est de minimiser la fonction de coût augmentée de cette pénalité. Cela a pour effet de "rétrécir" tous les coefficients, mais de ne jamais les rendre exactement égaux à zéro.
+
+La fonction de coût pour la régression ridge est définie comme suit :
+
+\[ J(\beta) = \sum_{i=1}^{n} (y_i - \beta_0 - \sum_{j=1}^{p} \beta_j x_{ij})^2 + \lambda \sum_{j=1}^{p} \beta_j^2 \]
+
+Ici, \( \lambda \) est le paramètre de pénalité qui contrôle l'ampleur de la pénalité. Plus \( \lambda \) est grand, plus la pénalité est forte.
+
+#### Régression Lasso (L1)
+
+La régression lasso ajoute une pénalité égale à la magnitude absolue des coefficients à la fonction de coût. Cela a tendance à pousser certains coefficients exactement à zéro, réalisant ainsi une sélection automatique des variables.
+
+La fonction de coût pour la régression lasso est définie comme suit :
+
+\[ J(\beta) = \sum_{i=1}^{n} (y_i - \beta_0 - \sum_{j=1}^{p} \beta_j x_{ij})^2 + \lambda \sum_{j=1}^{p} |\beta_j| \]
+
+Ici aussi, \( \lambda \) est le paramètre de pénalité.
+
+
+
+```{r}
+# Préparer les données
+X <- model.matrix(charges ~ age + age2 + smoker*bmi30, data = insurance_encoded)
+y <- insurance_encoded$charges
+
+# Ajuster le modèle lasso
+modele_lasso <- cv.glmnet(X, y, alpha = 1)
+coef(modele_lasso, s = "lambda.1se")
+plot(modele_lasso)
+```
+
+```{r}
+lasso_coef <- coef(modele_lasso)
+cat("\nLasso Coefficients:\n")
+print(lasso_coef)
+```
+
+```{r}
+# Ajuster le modèle ridge
+modele_ridge <- cv.glmnet(X, y, alpha = 0)
+coef(modele_ridge, s = "lambda.1se")
+plot(modele_ridge)
+
+```
+
+```{r}
+ridge_coef <- coef(modele_lasso)
+cat("Ridge Coefficients:\n")
+print(ridge_coef)
+```
+# Partie 3 : Analyse multidimensionnelle:
+
+1. Étude bibliographique sur l’analyse en composantes principales (ACP)
+L'analyse en composantes principales (ACP) est une technique statistique qui vise à réduire la dimensionnalité d'un ensemble de données en transformant les variables d'origine en un nouvel ensemble de variables non corrélées, appelées composantes principales. Les composantes principales sont ordonnées de telle sorte que la première explique la plus grande variance dans les données, la deuxième la deuxième plus grande, et ainsi de suite. L'ACP est largement utilisée pour explorer la structure sous-jacente des données et pour réduire le bruit en éliminant les corrélations entre les variables.
+
+### 2. Réduction de la dimension de la base de données modifiée
+
+
+```{r}
+
+df1<-insurance_encoded[, -4]
+# Appliquer l'ACP
+acp_result <- prcomp(df1, scale. = TRUE)
+
+# Afficher un résumé des résultats
+summary(acp_result)
+```
+```{r}
+# Afficher les valeurs propres
+print("Valeurs propres :")
+print(acp_result$sdev^2)
+
+# Afficher les vecteurs propres
+print("Vecteurs propres :")
+print(acp_result$rotation)
+```
+
+
+
+```{r}
+
+# Calculer la variance expliquée
+var_explained <- acp_result$sdev^2 / sum(acp_result$sdev^2)
+
+# Calculer la variance expliquée cumulée
+cum_var_explained <- cumsum(var_explained)
+
+# Créer le graphique de variance expliquée
+par(mfrow = c(1, 2))
+plot(var_explained, type = "b", main = "Variance expliquée par composante", xlab = "Composante", ylab = "Variance expliquée")
+plot(cum_var_explained, type = "b", main = "Variance expliquée cumulée", xlab = "Nombre de composantes", ylab = "Variance expliquée cumulée")
+```
+
+
+
+```{r}
+# Calculer la variance expliquée
+var_explained <- acp_result$sdev^2 / sum(acp_result$sdev^2)
+
+# Calculer la variance expliquée cumulée
+cum_var_explained <- cumsum(var_explained)
+
+# Déterminer l'échelle maximale
+max_scale <- max(c(max(var_explained), max(cum_var_explained)))
+
+# Créer un histogramme avec échelle spécifiée
+par(mfrow = c(1, 1))
+barplot(var_explained, names.arg = seq_along(var_explained), col = "skyblue", main = "Variance expliquée par composante", xlab = "Composante", ylab = "Variance expliquée", ylim = c(0, max_scale))
+
+# Ajouter une ligne représentant la variance expliquée cumulée
+lines(cum_var_explained, type = "b", pch = 16, col = "red", lty = 2)
+
+```
+
+
+```{r}
+# Sélectionner le nombre de composantes à inclure
+nombre_composantes <- 8  # À ajuster en fonction du résumé de l'ACP
+
+# Construire le modèle linéaire avec les composantes principales
+modele3 <- lm(charges ~ acp_result$x[, 1:nombre_composantes], data = insurance_modif3_encoded)
+
+# Afficher le résumé du modèle
+summary(modele3)
+```
+
+
+```{r}
+# Prédictions du modèle
+predictions_modele3 <- predict(modele3, newdata = insurance_modif3_encoded)
+
+# Évaluation du modèle (exemple avec RMSE)
+rmse_modele3 <- sqrt(mean((insurance_modif3_encoded$charges - predictions_modele3)^2))
+
+# Afficher le RMSE
+print(paste("RMSE du modele3 : ", rmse_modele3))
+
+# Afficher AIC
+print(paste("AIC du modele3 : ", AIC(modele3)))
+
+```
+
+```{r}
+plot(modele3)
+```
+#### le meilleur modèle est le modèle 3 meilleur aic rmse et graphic plots, ensuite modele 2 puis model 1.
+
+Tâches qui restent:
+Intérprétation sur le modèle 3 mm démarche que 2.
+compréhension lasso ridge (comparaison avec les papers)
+biblio voir cours ml.
+développement du résultat final graphique comparatif
+Sinn le code est complet + rapport rmd bien détaillé
+reste quelques retouches
